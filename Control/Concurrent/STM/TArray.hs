@@ -80,7 +80,7 @@ newTArray# b@(l, u) e = \s1# ->
 instance MArray TArray e STM where
     getBounds (TArray l u _ _) = return (l, u)
     getNumElements (TArray _ _ n _) = return n
-    newArray b e = STM $ newTArray# b e
+    newArray b e = STM (\s -> newTArray# b e s) Nothing
     unsafeRead (TArray _ _ _ arr#) (I# i#) = case indexArray# arr# i# of
         (# tvar# #) -> readTVar (TVar tvar#)
     unsafeWrite (TArray _ _ _ arr#) (I# i#) e = case indexArray# arr# i# of
