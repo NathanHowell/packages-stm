@@ -61,6 +61,10 @@ import Control.Monad.Fix
 import Control.Sequential.STM
 #endif
 
+#if MIN_VERSION_base(4,22,0)
+import GHC.Conc (runSTM, mkSTMFromAction)
+#endif
+
 #ifdef __GLASGOW_HASKELL__
 #if ! (MIN_VERSION_base(4,3,0))
 import Control.Applicative
@@ -139,14 +143,25 @@ throwSTM e = STM $ raiseIO# (toException e)
 data STMret a = STMret (State# RealWorld) a
 
 liftSTM :: STM a -> State# RealWorld -> STMret a
+#if MIN_VERSION_base(4,22,0)
+liftSTM m = \s -> case runSTM m s of (# s', r #) -> STMret s' r
+#else
 liftSTM (STM m) = \s -> case m s of (# s', r #) -> STMret s' r
+#endif
 
 -- | @since 2.3
 instance MonadFix STM where
+#if MIN_VERSION_base(4,22,0)
+  mfix k = mkSTMFromAction $ \s ->
+    let ans        = liftSTM (k r) s
+        STMret _ r = ans
+    in case ans of STMret s' x -> (# s', x #)
+#else
   mfix k = STM $ \s ->
     let ans        = liftSTM (k r) s
         STMret _ r = ans
     in case ans of STMret s' x -> (# s', x #)
+#endif
 
 #if !MIN_VERSION_base(4,17,0)
 instance Semigroup a => Semigroup (STM a) where
