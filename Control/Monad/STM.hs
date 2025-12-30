@@ -55,16 +55,12 @@ import Control.Exception
 #else
 import GHC.Conc
 #endif
-import GHC.Exts
 #if !MIN_VERSION_base(4,22,0)
+import GHC.Exts
 import Control.Monad.Fix
 #endif
 #else
 import Control.Sequential.STM
-#endif
-
-#if MIN_VERSION_base(4,22,0)
-import GHC.Conc (runSTM)
 #endif
 
 #ifdef __GLASGOW_HASKELL__
@@ -142,15 +138,13 @@ throwSTM e = STM $ raiseIO# (toException e)
 #endif
 
 
+#if !MIN_VERSION_base(4,22,0)
 data STMret a = STMret (State# RealWorld) a
 
 liftSTM :: STM a -> State# RealWorld -> STMret a
-#if MIN_VERSION_base(4,22,0)
-liftSTM m = \s -> case runSTM m s of (# s', r #) -> STMret s' r
-#else
 liftSTM (STM m) = \s -> case m s of (# s', r #) -> STMret s' r
-#endif
 
+#endif
 #if !MIN_VERSION_base(4,22,0)
 -- | @since 2.3
 instance MonadFix STM where

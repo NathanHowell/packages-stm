@@ -37,7 +37,7 @@ import Control.Concurrent.STM.TVar (readTVar, readTVarIO, writeTVar)
 import Data.Array.Base (safeRangeSize, MArray(..))
 import Data.Ix (Ix)
 #if MIN_VERSION_base(4,22,0)
-import GHC.Conc (TVar(..), mkSTMFromAction)
+import GHC.Conc (TVar(..), unsafeIOToSTM)
 #else
 import GHC.Conc (STM(..), TVar(..))
 #endif
@@ -85,7 +85,7 @@ instance MArray TArray e STM where
     getBounds (TArray l u _ _) = return (l, u)
     getNumElements (TArray _ _ n _) = return n
 #if MIN_VERSION_base(4,22,0)
-    newArray b e = mkSTMFromAction (\s -> newTArray# b e s)
+    newArray b e = unsafeIOToSTM (IO (newTArray# b e))
 #else
     newArray b e = STM (\s -> newTArray# b e s) Nothing
 #endif
