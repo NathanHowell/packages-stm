@@ -141,13 +141,7 @@ peekTQueue (TQueue read write) = do
 -- | A version of 'peekTQueue' which does not retry. Instead it
 -- returns @Nothing@ if no value is available.
 tryPeekTQueue :: TQueue a -> STM (Maybe a)
-tryPeekTQueue c = do
-  m <- tryReadTQueue c
-  case m of
-    Nothing -> return Nothing
-    Just x  -> do
-      unGetTQueue c x
-      return m
+tryPeekTQueue c = fmap Just (peekTQueue c) `orElse` return Nothing
 
 -- |Put a data item back onto a channel, where it will be the next item read.
 unGetTQueue :: TQueue a -> a -> STM ()

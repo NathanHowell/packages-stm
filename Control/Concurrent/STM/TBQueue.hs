@@ -185,13 +185,7 @@ peekTBQueue (TBQueue _ read _ write _) = do
 -- | A version of 'peekTBQueue' which does not retry. Instead it
 -- returns @Nothing@ if no value is available.
 tryPeekTBQueue :: TBQueue a -> STM (Maybe a)
-tryPeekTBQueue c = do
-  m <- tryReadTBQueue c
-  case m of
-    Nothing -> return Nothing
-    Just x  -> do
-      unGetTBQueue c x
-      return m
+tryPeekTBQueue c = fmap Just (peekTBQueue c) `orElse` return Nothing
 
 -- | Put a data item back onto a channel, where it will be the next item read.
 -- Blocks if the queue is full.
