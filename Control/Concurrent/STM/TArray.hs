@@ -33,10 +33,11 @@ module Control.Concurrent.STM.TArray (
 import Control.Monad.STM (STM, atomically)
 import Data.Typeable (Typeable)
 #if defined(HAS_UNLIFTED_ARRAY)
-import Control.Concurrent.STM.TVar (readTVar, readTVarIO, writeTVar)
+import Control.Concurrent.STM.TVar (newTVar, readTVar, readTVarIO, writeTVar)
 import Data.Array.Base (safeRangeSize, MArray(..))
 import Data.Ix (Ix)
 #if MIN_VERSION_base(4,22,0)
+import Control.Monad (replicateM)
 import GHC.Conc (TVar(..), unsafeIOToSTM)
 #else
 import GHC.Conc (STM(..), TVar(..))
@@ -69,6 +70,8 @@ instance (Eq i, Eq e) => Eq (TArray i e) where
         unsafeFirstT :: Array# (TVar# RealWorld e) -> TVar# RealWorld e
         unsafeFirstT arr# = case indexArray# arr# 0# of (# e #) -> e
 
+-- Used by the IO MArray instance, which can allocate n TVars in a single IO
+-- action.
 newTArray# :: Ix i => (i, i) -> e -> State# RealWorld -> (# State# RealWorld, TArray i e #)
 newTArray# b@(l, u) e = \s1# ->
     case safeRangeSize b of
@@ -81,11 +84,55 @@ newTArray# b@(l, u) e = \s1# ->
                     in case unsafeFreezeArray# marr# (if n <= 1 then s3# else go 1# s3#) of
                         (# s7#, arr# #) -> (# s7#, TArray l u n arr# #)
 
+#if MIN_VERSION_base(4,22,0)
+-- | Pack a list of already-allocated 'TVar' handles into the unboxed
+-- @Array# (TVar# ...)@ that backs a 'TArray'.  The key property: this function
+-- never calls 'newTVar#', so no STM-visible TVar allocation happens here.  The
+-- only IO it performs is allocating and filling a transient 'MutableArray#'
+-- (not a 'TVar'), then freezing it.  Called from the STM 'newArray' after the
+-- TVars have been allocated via 'newTVar' (i.e. as 'PNewTVar' plan nodes).
+packTVarsIO :: i -> i -> Int -> [TVar e] -> IO (TArray i e)
+packTVarsIO l u n tvs = IO $ \s0# ->
+    -- 'newArray#' is levpoly and requires a WHNF initial value for unlifted
+    -- element types.  For n>0 we use the first TVar handle from the list as
+    -- the initialiser; all slots are overwritten in 'go'.  For n=0 we create
+    -- a single dummy TVar in IO (it is immediately unreachable and GC'd — the
+    -- same approach as 'newTArray#' for empty ranges).
+    case tvs of
+        [] ->
+            -- n == 0: no slots to write; build a 0-element array.
+            case newTVar# (error "TArray: empty array dummy (unreachable)") s0# of
+                (# s1#, dummy# #) -> case newArray# 0# dummy# s1# of
+                    (# s2#, marr# #) -> case unsafeFreezeArray# marr# s2# of
+                        (# s3#, arr# #) -> (# s3#, TArray l u 0 arr# #)
+        (TVar init# : _) ->
+            case n of { I# n# ->
+            case newArray# n# init# s0# of
+                (# s1#, marr# #) ->
+                    -- Write each TVar handle into the array in list order.
+                    -- Slot 0 is already set to init# by newArray#; overwriting
+                    -- it here is harmless and keeps the loop uniform.
+                    let go _ [] s# = case unsafeFreezeArray# marr# s# of
+                            (# s2#, arr# #) -> (# s2#, TArray l u n arr# #)
+                        go i# (TVar tv# : rest) s# =
+                            go (i# +# 1#) rest (writeArray# marr# i# tv# s#)
+                    in go 0# tvs s1# }
+#endif
+
 instance MArray TArray e STM where
     getBounds (TArray l u _ _) = return (l, u)
     getNumElements (TArray _ _ n _) = return n
 #if MIN_VERSION_base(4,22,0)
-    newArray b e = unsafeIOToSTM (IO (newTArray# b e))
+    -- Allocate each TVar via 'newTVar' so the allocations appear as PNewTVar
+    -- nodes in the STM plan rather than as a single SUnsafeIO block.  Only the
+    -- final step — packing already-allocated TVar handles into an Array# — is
+    -- done in IO, and that step has no STM-visible effects (it never calls
+    -- newTVar# or reads/writes any TVar contents).
+    newArray b e = do
+        let n = safeRangeSize b
+            (l, u) = b
+        tvs <- replicateM n (newTVar e)
+        unsafeIOToSTM (packTVarsIO l u n tvs)
 #else
     newArray b e = STM (\s -> newTArray# b e s) Nothing
 #endif
